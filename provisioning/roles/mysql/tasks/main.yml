@@ -1,0 +1,58 @@
+- name: install mysql57 repository
+  yum:
+    state: present
+    name: https://dev.mysql.com/get/mysql57-community-release-el7-11.noarch.rpm
+    validate_certs: yes
+
+- name: install on mysql
+  yum:
+    state: present
+    name: "{{ item }}"
+  with_items:
+    - mysql-community-server
+    - MySQL-python
+
+- name: run and enable mysqld
+  service:
+    name: mysqld
+    state: started
+    enabled: yes
+
+- name: check /root/.my.cnf exists
+  stat:
+    path: /root/.my.cnf
+  register: root_mycnf
+
+- name: get root temporary password
+  shell: cat /var/log/mysqld.log | grep "temporary password" | awk '{print $11}'
+  register: mysql_default_password
+  when: not root_mycnf.stat.exists
+
+- name: change root password
+  shell: |
+    mysql -u root -p'{{ mysql_default_password.stdout }}' --connect-expired-password -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '{{ mysql_root_pw }}';"
+  when: not root_mycnf.stat.exists
+
+- name: deploy /root/.my.cnf
+  template:
+    src: templates/my.cnf.j2
+    dest: /root/.my.cnf
+    owner: root
+    group: root
+    mode: 0644
+
+- name: deploy /etc/.my.cnf
+  template:
+    src: templates/my.cnf.j2
+    dest: /etc/my.cnf
+
+- name: remove anonymous mysql_user
+  mysql_user:
+    name: ''
+    state: absent
+    host: localhost
+
+- name: restart mysqld
+  service:
+    name: mysqld
+    state: restarted

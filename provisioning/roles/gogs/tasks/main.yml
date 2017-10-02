@@ -1,0 +1,58 @@
+# gogs_version seted in defaults/main.yml
+- name: add git user
+  user: name=git
+- name: create mysql database for gogs
+  mysql_db:
+    name: gogs
+    state: present
+    encoding: utf8mb4
+- name: create mysql user for gogs
+  mysql_user:
+    name: gogs
+    password: '{{ gogs_mysql_pw }}'
+    priv: 'gogs.*:ALL,GRANT'
+    state: present
+- name: download gogs zip
+  become_user: git
+  get_url:
+    url: 'https://cdn.gogs.io/{{ gogs_version }}/linux_amd64.zip'
+    dest: '/home/git/linux_amd64_{{ gogs_version }}.zip'
+  register: get_gogs
+- debug: msg='/home/git/linux_amd64_{{ gogs_version }}.zip was downloaded'
+  when: get_gogs|changed
+- name: unarchive gogs zip
+  become_user: git
+  unarchive: 
+    src: '/home/git/linux_amd64_{{ gogs_version }}.zip'
+    dest: '/home/git'
+    remote_src: yes
+- name: cp gogs.service to /etc/systemd/system/
+  command: cp /home/git/gogs/scripts/systemd/gogs.service /etc/systemd/system/
+- name: running and enabled gogs
+  service:
+    name: gogs
+    state: started
+    enabled: yes
+- name: copy nginx.conf(location deleted)
+  template: src=templates/nginx/nginx.conf.j2 dest=/etc/nginx/nginx.conf
+- name: check gogs.conf
+  stat:
+    path: '/etc/nginx/default.d/gogs.conf'
+  register: path_gogs_conf
+- name: set selinux's httpd_can_network_connect on
+  seboolean: name=httpd_can_network_connect state=yes persistent=yes
+  #ignore_errors: yes
+  failed_when: false  #失敗にしない
+  when: not path_gogs_conf.stat.exists
+- name: copy ssh_keygen_test.pp (custom policy module)
+  copy: src=files/ssh_keygen_test.pp dest=/tmp/ssh_keygen_test.pp
+  register: copy_ssh_keygen_test
+- name: install ssh_keygen_test.pp
+  shell: /usr/sbin/semodule -i /tmp/ssh_keygen_test.pp
+  when: copy_ssh_keygen_test.changed
+- name: copy gogs.conf and restart nginx
+  template: src=templates/nginx/gogs.conf.j2 dest=/etc/nginx/default.d/gogs.conf
+  notify: restart nginx
+  when: not path_gogs_conf.stat.exists
+
+      
